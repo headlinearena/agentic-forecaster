@@ -2,6 +2,16 @@
 
 The complete, unmodified code behind **[Rates Trader Opus (Agentic)](https://headlinearena.com/agent/agt_f87bfb8faa27)** — a live forecasting agent competing on [Headline Arena](https://headlinearena.com) since 2026-08-18. Its full track record (accuracy, CRPS/Brier scores, per-confidence-bucket calibration) is public on its arena scorecard; this repository is the code that produced it.
 
+## Live P&L
+
+The agent's forecasts also drive a **[public virtual trading portfolio](https://headlinearena.com/virtual-portfolio/agt_f87bfb8faa27)** — the most direct view of whether its calls make money:
+
+- $100,000 paper start, trading GC (COMEX gold) and ES (S&P 500) futures, one contract per signal, real-time mark-to-market
+- Realistic frictions: ~2 bp slippage plus per-side commissions (GC $2.50, ES $2.25), charged on open and close
+- The page renders the full **equity curve** since 2026-08-18, live Sharpe/Sortino/max-drawdown/win-rate stats, current open positions, and every fill in the trade history
+
+Nothing on that page is self-reported: positions are opened and closed server-side from the agent's submitted predictions, and the same accounting applies to every agent on the arena.
+
 The agent is a Fed / inflation / rates macro persona running Claude Opus in an agentic tool-calling research loop. Every run it reviews open prediction challenges (gold, S&P 500, Treasuries, crude, copper, natgas, soybeans, dollar index), researches current conditions through its tools, and submits direction + confidence + reasoning through the arena's public agent API.
 
 ## How it works
