@@ -1,0 +1,599 @@
+{
+  "requested_scopes": [
+    "comment:create",
+    "comment:read:context",
+    "comment:reply",
+    "comment:like",
+    "reply:like",
+    "follow:create",
+    "follow:delete:self",
+    "follow:read",
+    "space:read",
+    "profile:read:self",
+    "profile:read:public",
+    "prediction:submit",
+    "challenge:read"
+  ],
+  "language_policy": {
+    "default_comment_language": "en",
+    "default_reply_language": "en",
+    "reply_in_chinese_when_target_is_chinese": true
+  },
+  "model": {
+    "provider": "Anthropic",
+    "name": "claude-opus-4-6",
+    "version": "claude-opus-4-6"
+  },
+  "generation": {
+    "backend": "azure_foundry_anthropic",
+    "api_base_url_env": "AZURE_ANTHROPIC_ENDPOINT",
+    "api_key_env": "AZURE_ANTHROPIC_API_KEY",
+    "model_env": "AZURE_ANTHROPIC_MODEL",
+    "anthropic_version": "2023-06-01",
+    "thinking": {
+      "type": "adaptive"
+    },
+    "output_config": {
+      "effort": "max"
+    },
+    "temperature": 1,
+    "max_tokens": 16384
+  },
+  "skills": {
+    "gold_trade": {
+      "enabled": true,
+      "skill_doc_path": "skills/gold-trade/SKILL.md"
+    },
+    "alpha_vantage": {
+      "enabled": true,
+      "skill_doc_path": "skills/alpha-vantage/SKILL.md",
+      "api_key_env": "ALPHAVANTAGE_API_KEY",
+      "cache_ttl_seconds": 86400,
+      "prediction_cache_ttl_seconds": 300,
+      "request_delay_seconds": 1.1,
+      "prediction_requests": [
+        {
+          "key": "gc_rsi",
+          "function": "RSI",
+          "label": "Gold RSI(14)",
+          "params": {
+            "symbol": "GLD",
+            "interval": "60min",
+            "time_period": "14",
+            "series_type": "close"
+          }
+        },
+        {
+          "key": "es_rsi",
+          "function": "RSI",
+          "label": "S&P 500 RSI(14)",
+          "params": {
+            "symbol": "SPY",
+            "interval": "60min",
+            "time_period": "14",
+            "series_type": "close"
+          }
+        },
+        {
+          "key": "cl_rsi",
+          "function": "RSI",
+          "label": "WTI Oil RSI(14)",
+          "params": {
+            "symbol": "USO",
+            "interval": "60min",
+            "time_period": "14",
+            "series_type": "close"
+          }
+        },
+        {
+          "key": "dx_rsi",
+          "function": "RSI",
+          "label": "USD Index RSI(14)",
+          "params": {
+            "symbol": "UUP",
+            "interval": "60min",
+            "time_period": "14",
+            "series_type": "close"
+          }
+        },
+        {
+          "key": "btc_quote",
+          "function": "CURRENCY_EXCHANGE_RATE",
+          "label": "Bitcoin price",
+          "params": {
+            "from_currency": "BTC",
+            "to_currency": "USD"
+          }
+        },
+        {
+          "key": "market_sentiment",
+          "function": "NEWS_SENTIMENT",
+          "label": "Market news sentiment",
+          "params": {
+            "tickers": "SPY,GLD",
+            "limit": "20"
+          }
+        },
+        {
+          "key": "es_kline",
+          "function": "TIME_SERIES_INTRADAY",
+          "label": "S&P 500 (SPY) 60min bars",
+          "params": {
+            "symbol": "SPY",
+            "interval": "60min",
+            "outputsize": "compact"
+          }
+        },
+        {
+          "key": "btc_kline",
+          "function": "DIGITAL_CURRENCY_DAILY",
+          "label": "Bitcoin (BTC/USD) daily bars",
+          "params": {
+            "symbol": "BTC",
+            "market": "USD"
+          }
+        }
+      ],
+      "comment_requests": [],
+      "reply_requests": []
+    },
+    "akshare": {
+      "enabled": true,
+      "skill_doc_path": "skills/akshare-market-data/SKILL.md",
+      "cache_ttl_seconds": 600,
+      "request_delay_seconds": 0.25,
+      "command_timeout_seconds": 60,
+      "request_attempts": 2,
+      "comment_requests": [
+        {
+          "key": "global_commodity_watchlist",
+          "dataset": "futures_foreign_commodity_realtime",
+          "mode": "watchlist_quote",
+          "label": "Global commodity futures watchlist",
+          "params": {
+            "symbol": [
+              "HG",
+              "NG",
+              "CAD"
+            ]
+          },
+          "symbols": [
+            "HG",
+            "NG",
+            "CAD"
+          ],
+          "unit": "price"
+        },
+        {
+          "key": "global_fx_watchlist",
+          "dataset": "fx_spot_quote",
+          "mode": "fx_quote",
+          "label": "Global FX watchlist",
+          "symbols": [
+            "USD/CNY",
+            "EUR/CNY",
+            "100JPY/CNY"
+          ],
+          "unit": "rate"
+        }
+      ],
+      "reply_requests": [
+        {
+          "key": "global_commodity_watchlist",
+          "dataset": "futures_foreign_commodity_realtime",
+          "mode": "watchlist_quote",
+          "label": "Global commodity futures watchlist",
+          "params": {
+            "symbol": [
+              "HG",
+              "NG",
+              "CAD"
+            ]
+          },
+          "symbols": [
+            "HG",
+            "NG",
+            "CAD"
+          ],
+          "unit": "price"
+        },
+        {
+          "key": "global_fx_watchlist",
+          "dataset": "fx_spot_quote",
+          "mode": "fx_quote",
+          "label": "Global FX watchlist",
+          "symbols": [
+            "USD/CNY",
+            "EUR/CNY",
+            "100JPY/CNY"
+          ],
+          "unit": "rate"
+        }
+      ],
+      "prediction_requests": [
+        {
+          "key": "gold_futures",
+          "dataset": "futures_foreign_commodity_realtime",
+          "mode": "watchlist_quote",
+          "label": "COMEX gold futures",
+          "params": {
+            "symbol": "GC"
+          },
+          "symbols": [
+            "GC"
+          ],
+          "unit": "price"
+        },
+        {
+          "key": "silver_futures",
+          "dataset": "futures_foreign_commodity_realtime",
+          "mode": "watchlist_quote",
+          "label": "COMEX silver futures",
+          "params": {
+            "symbol": "SI"
+          },
+          "symbols": [
+            "SI"
+          ],
+          "unit": "price"
+        },
+        {
+          "key": "crude_oil",
+          "dataset": "futures_foreign_commodity_realtime",
+          "mode": "watchlist_quote",
+          "label": "NYMEX crude oil",
+          "params": {
+            "symbol": "CL"
+          },
+          "symbols": [
+            "CL"
+          ],
+          "unit": "price"
+        },
+        {
+          "key": "fx_usd_strength",
+          "dataset": "fx_spot_quote",
+          "mode": "fx_quote",
+          "label": "USD strength proxy (FX)",
+          "symbols": [
+            "USD/CNY",
+            "EUR/CNY",
+            "100JPY/CNY"
+          ],
+          "unit": "rate"
+        }
+      ]
+    },
+    "fred_economic_data": {
+      "enabled": true,
+      "skill_doc_path": "skills/fred-economic-data/SKILL.md",
+      "api_key_env": "FRED_API_KEY",
+      "cache_ttl_seconds": 21600,
+      "request_delay_seconds": 0.25,
+      "comment_requests": [
+        {
+          "key": "two_year_yield",
+          "series_id": "DGS2",
+          "label": "2Y Treasury yield",
+          "unit": "%",
+          "params": {
+            "sort_order": "desc",
+            "limit": "10"
+          }
+        },
+        {
+          "key": "ten_year_yield",
+          "series_id": "DGS10",
+          "label": "10Y Treasury yield",
+          "unit": "%",
+          "params": {
+            "sort_order": "desc",
+            "limit": "10"
+          }
+        },
+        {
+          "key": "fed_funds_rate",
+          "series_id": "FEDFUNDS",
+          "label": "Effective fed funds rate",
+          "unit": "%",
+          "params": {
+            "sort_order": "desc",
+            "limit": "6"
+          }
+        },
+        {
+          "key": "cpi_yoy",
+          "series_id": "CPIAUCSL",
+          "label": "CPI year-over-year",
+          "unit": "%",
+          "params": {
+            "units": "pc1",
+            "sort_order": "desc",
+            "limit": "12"
+          }
+        },
+        {
+          "key": "unemployment_rate",
+          "series_id": "UNRATE",
+          "label": "Unemployment rate",
+          "unit": "%",
+          "params": {
+            "sort_order": "desc",
+            "limit": "6"
+          }
+        }
+      ],
+      "reply_requests": [
+        {
+          "key": "two_year_yield",
+          "series_id": "DGS2",
+          "label": "2Y Treasury yield",
+          "unit": "%",
+          "params": {
+            "sort_order": "desc",
+            "limit": "10"
+          }
+        },
+        {
+          "key": "ten_year_yield",
+          "series_id": "DGS10",
+          "label": "10Y Treasury yield",
+          "unit": "%",
+          "params": {
+            "sort_order": "desc",
+            "limit": "10"
+          }
+        },
+        {
+          "key": "fed_funds_rate",
+          "series_id": "FEDFUNDS",
+          "label": "Effective fed funds rate",
+          "unit": "%",
+          "params": {
+            "sort_order": "desc",
+            "limit": "6"
+          }
+        },
+        {
+          "key": "cpi_yoy",
+          "series_id": "CPIAUCSL",
+          "label": "CPI year-over-year",
+          "unit": "%",
+          "params": {
+            "units": "pc1",
+            "sort_order": "desc",
+            "limit": "12"
+          }
+        },
+        {
+          "key": "unemployment_rate",
+          "series_id": "UNRATE",
+          "label": "Unemployment rate",
+          "unit": "%",
+          "params": {
+            "sort_order": "desc",
+            "limit": "6"
+          }
+        }
+      ]
+    }
+  },
+  "persona": {
+    "role": "Fed / inflation / rates macro trader",
+    "english_role": "Fed / inflation / rates macro trader",
+    "tone": "restrained, data-driven, focused on pricing logic",
+    "style": "Discuss only Fed expectations, the inflation path, rates pricing, and the linkage across the dollar, Treasuries, and equities",
+    "specialties": [
+      "Fed policy",
+      "inflation",
+      "rates",
+      "the dollar",
+      "Treasury yields",
+      "equity valuation"
+    ],
+    "specialties_en": [
+      "Fed policy",
+      "inflation",
+      "rates",
+      "the dollar",
+      "Treasury yields",
+      "equity valuation"
+    ],
+    "interested_topics": [
+      "Fed",
+      "inflation",
+      "CPI",
+      "PPI",
+      "rates",
+      "yields",
+      "rate cuts",
+      "rate hikes",
+      "the dollar"
+    ]
+  },
+  "voice": {
+    "identity_line": "I do not care whether the narrative feels complete; I care whether the rates path is being repriced.",
+    "core_belief": "The reaction in front-end yields and the dollar says more than the headline itself about what the market believes.",
+    "opening_patterns": [
+      "I start by asking whether the market is repricing the Fed path rather than by discussing sentiment.",
+      "For me, this headline matters only if it changes rates expectations enough to be tradable.",
+      "Whether this thesis works or not eventually comes back to the reaction in rates and the dollar."
+    ],
+    "thesis_patterns": [
+      "My base case is that the market is trading the stability of the policy path rather than the headline itself.",
+      "If this leaves a persistent mark, it should first show up as a pricing shift across {asset_group}.",
+      "I would treat this as a disturbance to policy expectations rather than as an isolated event."
+    ],
+    "risk_patterns": [
+      "The easiest mistake is to confuse hedging demand with an actual shift in the policy path.",
+      "If front-end yields are not moving, many strong-sounding macro narratives are still mostly surface noise.",
+      "You cannot just watch sentiment here; you have to see whether the market is truly willing to reprice."
+    ],
+    "asset_patterns": [
+      "I care about whether {asset_group} are telling the same story together.",
+      "For me, the synchronized direction across {asset_group} is the evidence that the trade deserves conviction.",
+      "If {asset_group} are fighting each other, the logic is not ready for size yet."
+    ],
+    "closing_patterns": [
+      "My conclusion will not arrive before price confirmation does.",
+      "Until front-end yields and the dollar confirm together, I would not define this as a main theme.",
+      "Watch rates first, then decide whether the narrative is worth chasing."
+    ],
+    "reply_opening_patterns": [
+      "Your main line is fine, but I would anchor the standard closer to rates pricing.",
+      "I broadly agree, but one front-end rates confirmation is still missing from the trade.",
+      "The thesis can work, but it has to pass the rates market first."
+    ],
+    "reply_closing_patterns": [
+      "If front-end yields do not confirm it, I would treat it as noise rather than a main theme.",
+      "I will keep watching the dollar and the 2-year yield instead of widening the conclusion too early.",
+      "For me, without rates confirmation the thesis is still incomplete."
+    ],
+    "banned_phrases": [
+      "In conclusion",
+      "More worth watching is",
+      "Short term priority should be on"
+    ]
+  },
+  "prompt_style": {
+    "comment_examples": {
+      "en": [
+        "For me this is a front-end rates trade first, and the rest of the market should be read through that lens.",
+        "If the 2Y does not extend the move, I would fade any oversized narrative built off the first headline reaction.",
+        "The useful distinction here is whether the market is repricing the next Fed meeting or only reacting to noise."
+      ],
+      "zh": [
+        "这首先是前端利率交易，其他资产的反应都应该围绕这个核心去理解。",
+        "如果 2Y 没有顺着走，我会倾向于淡化基于第一眼 headline 搭出来的宏大叙事。",
+        "真正要分清的是，市场是在重定价下一次联储会议，还是只是在追逐噪音。"
+      ]
+    },
+    "comment_anti_examples": {
+      "en": [
+        "Markets are digesting the data and investors should remain cautious.",
+        "This could be important for the economy going forward.",
+        "The key now is to monitor how things develop."
+      ],
+      "zh": [
+        "市场正在消化这份数据，投资者应保持谨慎。",
+        "这可能对经济前景产生重要影响。",
+        "接下来关键还是继续观察事态发展。"
+      ]
+    }
+  },
+  "content_preferences": {
+    "enabled_spaces": [
+      "finance",
+      "policy",
+      "ai",
+      "international",
+      "technology"
+    ],
+    "allowed_event_types": [
+      "economic_release",
+      "fed",
+      "macro",
+      "news",
+      "policy"
+    ],
+    "min_severity": "medium",
+    "preferred_keywords": [
+      "fed",
+      "federal reserve",
+      "inflation",
+      "cpi",
+      "ppi",
+      "rates",
+      "yield",
+      "powell",
+      "interest rate",
+      "dollar",
+      "employment",
+      "jobs",
+      "payroll",
+      "labor",
+      "unemployment",
+      "gdp",
+      "growth",
+      "oil",
+      "fiscal"
+    ],
+    "blocked_keywords": [
+      "sports",
+      "celebrity",
+      "entertainment"
+    ],
+    "require_market_relevance": true,
+    "source_region": "global"
+  },
+  "comment_strategy": {
+    "enabled": true,
+    "max_comments_per_cycle": 1,
+    "skip_commented_events": true,
+    "focus_assets": [
+      "DXY",
+      "2Y Treasury yield",
+      "10Y Treasury yield",
+      "Nasdaq",
+      "S&P 500"
+    ],
+    "focus_assets_en": [
+      "DXY",
+      "2Y Treasury yield",
+      "10Y Treasury yield",
+      "Nasdaq",
+      "S&P 500"
+    ],
+    "closing_style": "In practice, I only care whether this changes pricing for the next Fed meeting and the terminal-rate path."
+  },
+  "reply_strategy": {
+    "enabled": true,
+    "max_replies_per_cycle": 1,
+    "min_candidate_score": 0,
+    "preferred_keywords": [
+      "fed",
+      "inflation",
+      "rates",
+      "yield",
+      "dollar",
+      "cpi",
+      "ppi"
+    ],
+    "stance": "add or refine the view through rates pricing",
+    "stance_en": "add one more rates-pricing condition",
+    "preferred_agents": []
+  },
+  "follow_strategy": {
+    "enabled": true,
+    "max_follows_per_cycle": 1,
+    "min_candidate_score": 0,
+    "preferred_model_providers": [],
+    "preferred_agents": []
+  },
+  "prediction_strategy": {
+    "enabled": true,
+    "blocked_challenge_keywords": [
+      "world cup",
+      "fifa",
+      "soccer",
+      "nba",
+      "nfl",
+      "mlb",
+      "nhl",
+      "esport",
+      "btc",
+      "bitcoin",
+      "crypto"
+    ],
+    "max_predictions_per_cycle": 10,
+    "min_confidence": 0.6
+  },
+  "runtime": {
+    "interval_seconds": 900
+  },
+  "observability": {
+    "langfuse": {
+      "enabled": true
+    }
+  }
+}

@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+
+.env
+.env.*
+!.env.example
+
+agent-state/
+*.credentials.json
+*.state.json
+*.pending_credentials.jsonl
+*.pending_processed_items.jsonl

@@ -1,0 +1,94 @@
+x-agent-common: &agent-common
+  build: .
+  user: "1000:1000"
+  restart: unless-stopped
+  env_file:
+    - .env
+  environment: &agent-common-env
+    BASE_URL: ${AGENT_BASE_URL:-https://headlinearena.com}
+    POSTGRES_HOST: postgres
+    POSTGRES_PORT: "5432"
+    EMBEDDING_SERVICE_URL: http://embedding-service:8000
+  volumes:
+    - ./agent-state:/app/agent-state
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  embedding-service:
+    build: ./embedding_service
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=5)"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+
+  # The forecasting agent itself: an agentic tool-calling research loop that submits
+  # real predictions to Headline Arena under its own registered identity.
+  agentic-forecaster:
+    <<: *agent-common
+    environment:
+      <<: *agent-common-env
+      CONFIG_PATH: /app/configs/agents/macro_rates_opus_agentic_live.json
+      CREDENTIAL_PATH: /app/agent-state/macro_rates_opus_agentic_live.credentials.json
+      STATE_PATH: /app/agent-state/macro_rates_opus_agentic_live.state.json
+      AGENT_NAME: "${AGENTIC_FORECASTER_NAME:-Rates Trader Opus (Agentic)}"
+      AGENT_BIO: "${AGENTIC_FORECASTER_BIO:-Fed, inflation, and rates pricing agent focused on Treasury and dollar repricing, using an agentic tool-calling research loop.}"
+      INTERVAL_SECONDS: "${AGENTIC_LIVE_INTERVAL_SECONDS:-1800}"
+
+  # Workers below poll every persona listed in configs/financial_personas/financial_personas.txt.
+  # The directory (not the file) is bind-mounted read-only: worker_entrypoint.sh re-reads the
+  # file every cycle, so pause/resume is just editing it -- no docker command needed.
+
+  # Pulls settled challenge outcomes back from the arena into local prediction_history.
+  settlement-sync:
+    <<: *agent-common
+    entrypoint: ["/bin/bash", "/app/scripts/worker_entrypoint.sh"]
+    environment:
+      <<: *agent-common-env
+      WORKER_SUBCOMMAND: backfill-outcomes
+      INTERVAL_SECONDS: "${SETTLEMENT_SYNC_INTERVAL_SECONDS:-3600}"
+    volumes:
+      - ./agent-state:/app/agent-state
+      - ./configs/financial_personas:/app/configs/financial_personas:ro
+
+  # Distills lessons from settled predictions into the retrieval memory.
+  reflection-worker:
+    <<: *agent-common
+    entrypoint: ["/bin/bash", "/app/scripts/worker_entrypoint.sh"]
+    environment:
+      <<: *agent-common-env
+      WORKER_SUBCOMMAND: generate-reflections
+      INTERVAL_SECONDS: "${REFLECTION_WORKER_INTERVAL_SECONDS:-86400}"
+    volumes:
+      - ./agent-state:/app/agent-state
+      - ./configs/financial_personas:/app/configs/financial_personas:ro
+
+  # Trailing-window performance report (win rate, per-asset breakdown, calibration),
+  # surfaced to the agent through the get_latest_backtest_report tool.
+  backtest-report-worker:
+    <<: *agent-common
+    entrypoint: ["/bin/bash", "/app/scripts/worker_entrypoint.sh"]
+    environment:
+      <<: *agent-common-env
+      WORKER_SUBCOMMAND: generate-backtest-report
+      INTERVAL_SECONDS: "${BACKTEST_REPORT_WORKER_INTERVAL_SECONDS:-604800}"
+    volumes:
+      - ./agent-state:/app/agent-state
+      - ./configs/financial_personas:/app/configs/financial_personas:ro
+
+volumes:
+  postgres-data:

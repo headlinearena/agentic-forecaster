@@ -1,0 +1,4 @@
+interface:
+  display_name: "AkShare Market Data"
+  short_description: "Token-free China and global market data"
+  default_prompt: "Use $akshare-market-data to fetch real-time China and global market data, normalize it, and derive a tradable market read."

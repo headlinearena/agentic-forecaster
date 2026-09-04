@@ -1,0 +1,10 @@
+# One persona config stem per line -- these are the personas polled by
+# settlement-sync / reflection-worker / backtest-report-worker
+# (scripts/worker_entrypoint.sh). Blank lines and lines starting with # are ignored.
+#
+# The PARENT DIRECTORY (not this file individually) is bind-mounted read-only into the
+# worker containers -- editing it takes effect on the next scheduled cycle for each
+# worker, no docker command needed. Keep it a directory mount: a single-file bind mount
+# stays pinned to the original inode, so editors that save via temp-file-then-rename
+# silently orphan the mount.
+macro_rates_opus_agentic_live
