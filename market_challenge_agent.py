@@ -4982,6 +4982,17 @@ def build_agentic_prediction_prompt(
             f"Linked event title: {event_title_for_language(event, language)}\n"
             f"Linked event description: {event.get('description') or ''}\n"
         )
+    revision_info = challenge.get("_agentic_revision")
+    if revision_info:
+        user_prompt += (
+            "\nThis is a POSSIBLE REVISION of your own earlier prediction on this challenge:"
+            f" you previously called {revision_info.get('prev_direction') or 'unknown'}"
+            f" with confidence {revision_info.get('prev_confidence') if revision_info.get('prev_confidence') is not None else 'unknown'}"
+            f" at {revision_info.get('predicted_at') or 'an earlier time'}.\n"
+            "Re-check current conditions with your tools. Only change your call if fresh evidence"
+            " genuinely moved your thesis -- an unchanged view with an unchanged confidence is a"
+            " valid answer and will simply keep the earlier prediction.\n"
+        )
     return system_prompt, user_prompt
 
 
@@ -5003,8 +5014,11 @@ def select_eligible_challenges_for_agentic_pilot(
     predict_windows = strategy.get("predict_windows") or []
     blocked_challenge_keywords = [kw.lower() for kw in (strategy.get("blocked_challenge_keywords") or [])]
     max_deadline_hours_ahead = int(strategy.get("max_deadline_hours_ahead") or 0)
+    allow_revision = bool(strategy.get("allow_revision", True))
+    revision_min_interval = int(strategy.get("revision_min_interval_seconds", 3600))
 
     eligible: list[dict[str, Any]] = []
+    revision_eligible: list[dict[str, Any]] = []
     for item in items:
         if not isinstance(item, dict):
             continue
@@ -5029,10 +5043,25 @@ def select_eligible_challenges_for_agentic_pilot(
         if not is_within_predict_window(item, predict_windows, now):
             continue
         if agent.has_predicted(challenge_id):
-            continue
-        eligible.append(item)
+            if not allow_revision:
+                continue
+            history = agent.get_prediction_history(challenge_id) or {}
+            last_predicted_at = parse_datetime_value(history.get("predicted_at"))
+            if last_predicted_at is not None and (now - last_predicted_at).total_seconds() < revision_min_interval:
+                continue
+            # Annotate in place: downstream (prompt builder + live submission) reads this
+            # marker to add prior-call context and to gate the revision on a meaningful change.
+            item["_agentic_revision"] = {
+                "prev_direction": str(history.get("direction") or "") or None,
+                "prev_confidence": float(history["confidence"]) if history.get("confidence") is not None else None,
+                "predicted_at": history.get("predicted_at"),
+            }
+            revision_eligible.append(item)
+        else:
+            eligible.append(item)
 
-    return eligible[:max_predictions]
+    # New predictions take priority over revisions within the per-cycle budget.
+    return (eligible + revision_eligible)[:max_predictions]
 
 
 def run_agentic_prediction_cycle(agent: "MarketCommentAgent", config: dict[str, Any]) -> dict[str, Any]:
@@ -5160,6 +5189,7 @@ def run_agentic_prediction_cycle_live(
 
     strategy = config.get("prediction_strategy") or {}
     min_confidence = float(strategy.get("min_confidence") or 0.0)
+    revision_confidence_threshold = float(strategy.get("revision_confidence_threshold", 0.15))
 
     if not dry_run:
         result["scope_update"] = agent.ensure_scopes(["prediction:submit"])
@@ -5171,12 +5201,27 @@ def run_agentic_prediction_cycle_live(
         challenge_id = str(challenge.get("id") or "").strip()
         if not challenge_id:
             continue
-        request_body = build_prediction_request(prediction)
+        revision_info = challenge.get("_agentic_revision")
+        is_revision = revision_info is not None
+        request_body = build_prediction_request(prediction, is_revision=is_revision)
         item["request_body"] = request_body
         confidence = float(prediction.get("confidence") or 0.0)
         if confidence <= min_confidence:
             item["skipped_reason"] = f"confidence {confidence:.2f} at or below min_confidence {min_confidence:.2f}"
             continue
+        if is_revision:
+            # Only submit a revision when the thesis meaningfully moved.
+            prev_direction = str((revision_info or {}).get("prev_direction") or "")
+            prev_confidence = float((revision_info or {}).get("prev_confidence") or 0.0)
+            direction_changed = str(prediction.get("direction") or "") != prev_direction
+            confidence_shifted = abs(confidence - prev_confidence) >= revision_confidence_threshold
+            if not direction_changed and not confidence_shifted:
+                item["skipped_reason"] = (
+                    f"revision unchanged (direction {prev_direction}, "
+                    f"confidence delta {abs(confidence - prev_confidence):.2f} < {revision_confidence_threshold:.2f})"
+                )
+                continue
+            item["is_revision"] = True
         if dry_run:
             continue
         try:

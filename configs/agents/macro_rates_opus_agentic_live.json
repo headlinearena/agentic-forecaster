@@ -586,7 +586,8 @@
       "crypto"
     ],
     "max_predictions_per_cycle": 10,
-    "min_confidence": 0.6
+    "min_confidence": 0.6,
+    "revision_min_interval_seconds": 600
   },
   "runtime": {
     "interval_seconds": 900
