@@ -587,7 +587,8 @@
     ],
     "max_predictions_per_cycle": 10,
     "min_confidence": 0.6,
-    "revision_min_interval_seconds": 600
+    "revision_min_interval_seconds": 600,
+    "revision_confidence_threshold": 0.1
   },
   "runtime": {
     "interval_seconds": 900
