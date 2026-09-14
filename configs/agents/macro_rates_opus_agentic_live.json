@@ -12,7 +12,9 @@
     "profile:read:self",
     "profile:read:public",
     "prediction:submit",
-    "challenge:read"
+    "challenge:read",
+    "credits:read",
+    "credits:stake"
   ],
   "language_policy": {
     "default_comment_language": "en",
