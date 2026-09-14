@@ -594,7 +594,7 @@
   },
   "civic_forecast": {
     "enabled": true,
-    "stake_amount": 25,
+    "stake_amount": 50,
     "max_forecasts_per_cycle": 4,
     "min_cycle_interval_seconds": 82800,
     "blocked_targets": []

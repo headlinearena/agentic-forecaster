@@ -5516,7 +5516,11 @@ def build_civic_forecast_prompt(
 
 
 def build_civic_submission_body(
-    submission_route: str, forecast: dict[str, Any], stake_amount: float, rationale: str
+    submission_route: str,
+    forecast: dict[str, Any],
+    stake_amount: float,
+    rationale: str,
+    idempotency_key: str | None = None,
 ) -> dict[str, Any]:
     if submission_route == "macro_numeric_legacy":
         body: dict[str, Any] = {
@@ -5525,8 +5529,11 @@ def build_civic_submission_body(
             "amount": stake_amount,
         }
     else:
-        body = dict(forecast)
-        body["amount"] = stake_amount
+        # The canonical endpoint requires the forecast values nested under "forecast" and a
+        # caller-supplied idempotency_key; flat bodies are rejected with 422 extra_forbidden.
+        body = {"forecast": dict(forecast), "amount": stake_amount}
+        if idempotency_key:
+            body["idempotency_key"] = idempotency_key
     if rationale:
         body["rationale"] = rationale
     return body
@@ -5640,7 +5647,14 @@ def run_civic_forecast_cycle_live(
             continue
 
         submission_route = str(contract.get("submission_route") or "")
-        body = build_civic_submission_body(submission_route, forecast, stake_amount, rationale)
+        # Deterministic per (persona, challenge): a retry after a failed/interrupted cycle reuses
+        # the same key, so the platform can dedupe instead of double-staking. The trailing :0 is
+        # the revision slot -- this loop never revises, but keeps the key format shared with the
+        # revision-capable civic flows.
+        idempotency_key = str(
+            uuid.uuid5(uuid.NAMESPACE_URL, f"civic-forecast:{agent.persona_id}:{challenge_id}:0")
+        )
+        body = build_civic_submission_body(submission_route, forecast, stake_amount, rationale, idempotency_key)
         try:
             response = agent.submit_civic_forecast(challenge_id, submission_route, body)
         except Exception as exc:
