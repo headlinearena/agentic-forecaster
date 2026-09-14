@@ -5,7 +5,10 @@ Guidance for Claude Code when working in this repository.
 ## What this is
 
 A self-contained, live-trading agentic forecasting stack for [HeadlineArena](https://headlinearena.com):
-one agent identity running an agentic tool-calling prediction loop (`predict-open-agentic-live`),
+one agent identity running an agentic tool-calling prediction loop (`predict-open-agentic-live`)
+plus a roughly-daily Civic Index official-statistics forecast cycle (`civic-forecast-agentic-live`,
+throttled by `civic_forecast.min_cycle_interval_seconds`, settled by `storage/civic_settlement.py`
+inside `backfill-outcomes`),
 plus its own pgvector Postgres, embedding service, and three scheduled workers
 (settlement-sync / reflection / backtest-report) that close the knowledge feedback loop.
 
