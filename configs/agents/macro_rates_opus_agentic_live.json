@@ -590,6 +590,13 @@
     "revision_min_interval_seconds": 600,
     "revision_confidence_threshold": 0.1
   },
+  "civic_forecast": {
+    "enabled": true,
+    "stake_amount": 25,
+    "max_forecasts_per_cycle": 4,
+    "min_cycle_interval_seconds": 82800,
+    "blocked_targets": []
+  },
   "runtime": {
     "interval_seconds": 900
   },

@@ -14,6 +14,7 @@ from typing import Any, Callable
 from urllib import error, parse, request
 
 from storage import backtest as storage_backtest
+from storage import civic_settlement as storage_civic_settlement
 from storage import comment_history as storage_comment_history
 from storage import credentials as storage_credentials
 from storage import llm_usage as storage_llm_usage
@@ -2059,6 +2060,22 @@ class MarketCommentAgent:
             url = f"{self.base_url}/api/v1/eval/human-forecasts/challenges/{quoted}/forecast"
         result = http_request("POST", url, body=request_body, headers=self.auth_headers())
         return result if isinstance(result, dict) else {"raw": result}
+
+    def fetch_civic_challenge_detail(self, challenge_id: str) -> dict[str, Any] | None:
+        """Fetch a civic challenge's detail payload for settlement, trying the canonical
+        human-forecast endpoint first and the legacy macro endpoint as fallback."""
+        quoted = parse.quote(challenge_id, safe="")
+        for path in (
+            f"/api/v1/public/human-forecasts/challenges/{quoted}",
+            f"/api/v1/eval/macro/challenges/{quoted}",
+        ):
+            try:
+                data = http_request("GET", f"{self.base_url}{path}", headers=self.auth_headers())
+            except ApiError:
+                continue
+            if isinstance(data, dict):
+                return data
+        return None
 
     def mark_civic_forecasted(self, challenge_id: str) -> None:
         storage_processed_items.mark_processed(
@@ -4482,7 +4499,13 @@ def run_backfill_outcomes(agent: "MarketCommentAgent") -> dict[str, Any]:
     earliest_pending_shadow = earliest_pending_shadow_dt.date() if earliest_pending_shadow_dt else None
     pending_dates = [d for d in (earliest_pending, earliest_pending_shadow) if d is not None]
     if not pending_dates:
-        return {"persona_id": agent.persona_id, "resolved_items": 0, "updated": 0, "shadow_updated": 0}
+        return {
+            "persona_id": agent.persona_id,
+            "resolved_items": 0,
+            "updated": 0,
+            "shadow_updated": 0,
+            "civic_updated": 0,
+        }
     earliest_pending = min(pending_dates)
 
     # 1-day safety margin: a challenge can resolve the same day it was created.
@@ -4503,12 +4526,44 @@ def run_backfill_outcomes(agent: "MarketCommentAgent") -> dict[str, Any]:
 
     updated = storage_settlement.backfill_outcomes(agent.persona_id, items)
     shadow_updated = storage_strategy_cards.backfill_shadow_outcomes(agent.persona_id, items)
+    civic_updated = storage_civic_settlement.backfill_civic_outcomes(
+        agent.persona_id, build_civic_detail_fetcher(agent)
+    )
     return {
         "persona_id": agent.persona_id,
         "resolved_items": len(items),
         "updated": updated,
         "shadow_updated": shadow_updated,
+        "civic_updated": civic_updated,
     }
+
+
+def build_civic_detail_fetcher(agent: "MarketCommentAgent"):
+    """Fetcher for civic settlement: the platform exposes resolved rounds' actual values in the
+    prediction-contracts discovery payload (fetched once, lazily), with the per-challenge detail
+    endpoints as fallback for anything discovery doesn't carry."""
+    discovery_challenges: dict[str, dict[str, Any]] = {}
+    discovery_loaded = False
+
+    def fetch(challenge_id: str) -> dict[str, Any] | None:
+        nonlocal discovery_loaded
+        if not discovery_loaded:
+            discovery_loaded = True
+            try:
+                data = agent.list_prediction_contracts()
+                for entry in data.get("entries") or []:
+                    challenge = entry.get("current_challenge") or {}
+                    entry_id = str(challenge.get("challenge_id") or "").strip()
+                    if entry_id:
+                        discovery_challenges[entry_id] = challenge
+            except Exception as exc:
+                print(f"build_civic_detail_fetcher: discovery fetch failed: {exc}", file=sys.stderr)
+        payload = discovery_challenges.get(str(challenge_id))
+        if payload is not None and storage_civic_settlement.extract_civic_actual(payload) is not None:
+            return payload
+        return agent.fetch_civic_challenge_detail(challenge_id)
+
+    return fetch
 
 
 def build_reflection_prompt(asset_key: str, strategy: str, rows: list[dict[str, Any]]) -> tuple[str, str]:
@@ -5490,6 +5545,25 @@ def run_civic_forecast_cycle_live(
     if not civic_config.get("enabled", False):
         return {"persona_id": agent.persona_id, "status": "skipped", "reason": "civic_forecast_not_enabled"}
 
+    # Cadence gate: the entrypoint invokes this every INTERVAL_SECONDS, but civic rounds move on
+    # official-release timescales, so personas throttle via min_cycle_interval_seconds (e.g. 82800
+    # for roughly daily). The stamp is written only when a generation attempt actually starts, so
+    # idle/unfunded ticks keep retrying at the entrypoint cadence. Dry runs bypass the gate and
+    # never stamp -- a manual verification must not consume (or block) the day's real cycle.
+    min_cycle_interval = float(civic_config.get("min_cycle_interval_seconds", 0))
+    if min_cycle_interval > 0 and not dry_run:
+        last_cycle = parse_datetime_value(agent.state.get("civic_last_cycle_at"))
+        if last_cycle is not None:
+            elapsed = (datetime.now(timezone.utc) - last_cycle).total_seconds()
+            if elapsed < min_cycle_interval:
+                return {
+                    "persona_id": agent.persona_id,
+                    "status": "skipped",
+                    "reason": "civic cycle cooldown",
+                    "last_cycle_at": agent.state.get("civic_last_cycle_at"),
+                    "next_eligible_in_seconds": round(min_cycle_interval - elapsed),
+                }
+
     stake_amount = float(civic_config.get("stake_amount", 10))
     entries = select_open_civic_entries(agent, config)
     if not entries:
@@ -5507,6 +5581,10 @@ def run_civic_forecast_cycle_live(
             "eligible_challenges": [str((e["challenge"] or {}).get("challenge_id")) for e in entries],
             "reason": "agent wallet cannot cover one stake; fund it via POST /agent/owner/topup",
         }
+
+    if not dry_run:
+        agent.state["civic_last_cycle_at"] = datetime.now(timezone.utc).isoformat()
+        agent.save_state()
 
     chat_model = build_langchain_chat_model(config)
     knowledge_tools = build_knowledge_tools(agent.persona_id)
