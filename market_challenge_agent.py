@@ -570,6 +570,12 @@ def voice_bundle(config: dict[str, Any], language: str) -> dict[str, Any]:
     }
 
 
+def _redact_url_secrets(url: str) -> str:
+    """Strip credential query params from URLs before they land in error messages -- ApiError
+    text flows into logs, Langfuse traces, and (via agentic tool results) LLM context."""
+    return re.sub(r"(?i)\b((?:api_?key|apikey|token|access_key)=)[^&#]+", r"\1<redacted>", url)
+
+
 def http_request(
     method: str,
     url: str,
@@ -600,12 +606,12 @@ def http_request(
                 return json.loads(raw)
             return raw
     except TimeoutError as exc:
-        raise ApiError(f"Request to {url} timed out after {timeout_seconds} seconds") from exc
+        raise ApiError(f"Request to {_redact_url_secrets(url)} timed out after {timeout_seconds} seconds") from exc
     except error.HTTPError as exc:
         detail = exc.read().decode("utf-8", "ignore")
-        raise ApiError(f"HTTP {exc.code} for {url}: {detail}") from exc
+        raise ApiError(f"HTTP {exc.code} for {_redact_url_secrets(url)}: {detail}") from exc
     except error.URLError as exc:
-        raise ApiError(f"Failed to reach {url}: {exc}") from exc
+        raise ApiError(f"Failed to reach {_redact_url_secrets(url)}: {exc}") from exc
 
 
 def http_json_request(
