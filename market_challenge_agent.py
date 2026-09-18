@@ -38,7 +38,7 @@ from agentic.loop import (
     run_agentic_generation,
 )
 from agentic.observability import build_langfuse_callbacks
-from agentic.tools import build_knowledge_tools, build_skill_tools
+from agentic.tools import build_data_lookup_tools, build_knowledge_tools, build_skill_tools
 
 
 def load_dotenv_file(path: Path) -> None:
@@ -2184,6 +2184,39 @@ class MarketCommentAgent:
         error_message = data.get("error_message")
         if error_code or error_message:
             raise ApiError(f"FRED error for {series_id}: {error_code or ''} {error_message or ''}".strip())
+        return data
+
+    def fred_search_series(self, search_text: str, api_key: str, limit: int = 8) -> dict[str, Any]:
+        query = parse.urlencode(
+            {
+                "search_text": search_text,
+                "api_key": api_key,
+                "file_type": "json",
+                "limit": str(limit),
+                "order_by": "popularity",
+                "sort_order": "desc",
+            }
+        )
+        data = http_request("GET", f"https://api.stlouisfed.org/fred/series/search?{query}")
+        if not isinstance(data, dict):
+            raise ApiError("Expected JSON object from FRED series search")
+        if data.get("error_code") or data.get("error_message"):
+            raise ApiError(
+                f"FRED search error: {data.get('error_code') or ''} {data.get('error_message') or ''}".strip()
+            )
+        return data
+
+    def eurostat_get_dataset(self, dataset: str, query: str) -> dict[str, Any]:
+        # The filter string is model-authored -- round-trip it through parse_qsl/urlencode so only
+        # well-formed key=value pairs reach the URL.
+        sanitized = parse.urlencode(parse.parse_qsl(query))
+        url = (
+            "https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data/"
+            f"{parse.quote(dataset, safe='')}?format=JSON&lang=EN&{sanitized}"
+        )
+        data = http_request("GET", url)
+        if not isinstance(data, dict):
+            raise ApiError(f"Expected JSON object from Eurostat for {dataset}")
         return data
 
     def get_fred_snapshot(self, purpose: str) -> dict[str, Any]:
@@ -5471,8 +5504,40 @@ def normalize_civic_forecast(
     return {}, [f"unsupported outcome_shape: {outcome_shape}"]
 
 
+_CIVIC_SERIES_HINTS = {
+    "RETAIL_SALES": "FRED series RSAFS (nominal level; call with units=pch for the month-over-month % print)",
+    "HF_US_RETAIL_SALES": "FRED series RSAFS (nominal level; call with units=pch for the month-over-month % print)",
+    "HF_US_BUILDING_PERMITS": "FRED series PERMIT (thousands of units, SAAR)",
+    "HF_US_HOUSING_STARTS": "FRED series HOUST (thousands of units, SAAR)",
+    "HF_US_ICLAIMS": "FRED series ICSA (weekly initial claims, persons, SA)",
+    "HF_US_JOLTS_OPENINGS": "FRED series JTSJOL (job openings, thousands, SA)",
+    "HF_US_PHILLY_FED_MFG": "FRED series GACDFSA066MSFRBPHI (Philly Fed general activity index, SA)",
+    "HF_US_REGULAR_GASOLINE": "FRED series GASREGW (US regular retail gasoline, dollars/gallon, weekly)",
+    "HF_EU_UNEMP": "Eurostat dataset une_rt_m with filters geo=EA21&age=TOTAL&sex=T&s_adj=SA&unit=PC_ACT",
+    "HF_EU_YOUTH_UNEMP": "Eurostat dataset une_rt_m with filters geo=EA21&age=Y_LT25&sex=T&s_adj=SA&unit=PC_ACT",
+}
+
+
+def build_civic_lookup_tools(agent: "MarketCommentAgent") -> list:
+    """Series-lookup tools for civic forecasting: FRED tools appear only when the fred skill is
+    enabled and keyed; the keyless Eurostat tool is always included."""
+    skill_config = (agent.config.get("skills") or {}).get("fred_economic_data") or {}
+    fred_key = (
+        os.environ.get(str(skill_config.get("api_key_env", "FRED_API_KEY")))
+        if skill_config.get("enabled", False)
+        else None
+    )
+    return build_data_lookup_tools(
+        (lambda series_id, params: agent.fred_get_series_observations(series_id, params, fred_key))
+        if fred_key
+        else None,
+        (lambda text, limit: agent.fred_search_series(text, fred_key, limit)) if fred_key else None,
+        agent.eurostat_get_dataset,
+    )
+
+
 def build_civic_forecast_prompt(
-    contract: dict[str, Any], challenge: dict[str, Any], config: dict[str, Any]
+    contract: dict[str, Any], challenge: dict[str, Any], config: dict[str, Any], lookup_tools: bool = False
 ) -> tuple[str, str]:
     persona = config.get("persona") or {}
     schema = contract.get("forecast_schema") or {}
@@ -5486,6 +5551,15 @@ def build_civic_forecast_prompt(
         " especially relevant here). Use the relevant tools before deciding -- ground your forecast in"
         " the indicator's recent trend, the stated market consensus, and any fresher signals."
     )
+    if lookup_tools:
+        system_prompt += (
+            " Always start by pulling the target indicator's OWN recent history"
+            " (fred_series_observations, or eurostat_series_observations for European statistics;"
+            " fred_series_search finds series ids). Anchor mean on the indicator's latest prints and"
+            " momentum, not on the broad macro backdrop alone -- a rationale that cites only rates,"
+            " CPI, and unemployment while ignoring the indicator's own trajectory is a known failure"
+            " mode. Cite the specific recent values you anchored on in your rationale."
+        )
     if outcome_shape == "numeric_distribution":
         bounds = []
         if schema.get("value_min") is not None:
@@ -5512,6 +5586,13 @@ def build_civic_forecast_prompt(
         f"Region: {contract.get('region') or ''}\n"
         f"Forecast deadline (UTC): {deadline}\n"
     )
+    if lookup_tools:
+        hint = _CIVIC_SERIES_HINTS.get(str(contract.get("target_key") or "").upper())
+        if hint:
+            user_prompt += (
+                f"Data source hint for this indicator: {hint}."
+                " If it errors or looks stale, search for a current alternative.\n"
+            )
     return system_prompt, user_prompt
 
 
@@ -5595,12 +5676,15 @@ def run_civic_forecast_cycle_live(
 
     chat_model = build_langchain_chat_model(config)
     knowledge_tools = build_knowledge_tools(agent.persona_id)
+    # Lookup tools join the skill group so the required-tool gate accepts a targeted series
+    # fetch as the live-data call.
+    lookup_tools = build_civic_lookup_tools(agent)
     skill_tools = build_skill_tools(
         _SKILL_REGISTRY,
         config.get("skills") or {},
         lambda fetch_name, purpose: getattr(agent, fetch_name)(purpose),
         determine_comment_language(config),
-    )
+    ) + lookup_tools
     tools = knowledge_tools + skill_tools
 
     items: list[dict[str, Any]] = []
@@ -5617,7 +5701,9 @@ def run_civic_forecast_cycle_live(
         items.append(item)
 
         schema_cls = NumericForecastOutput if outcome_shape == "numeric_distribution" else BinaryForecastOutput
-        system_prompt, user_prompt = build_civic_forecast_prompt(contract, challenge, config)
+        system_prompt, user_prompt = build_civic_forecast_prompt(
+            contract, challenge, config, lookup_tools=bool(lookup_tools)
+        )
         callbacks, langfuse_metadata = build_langfuse_callbacks(config, f"{agent.persona_id}-civic", "civic_forecast")
         try:
             output = run_agentic_generation(
