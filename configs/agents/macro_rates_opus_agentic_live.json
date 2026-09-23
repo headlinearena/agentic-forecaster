@@ -378,6 +378,10 @@
           }
         }
       ]
+    },
+    "palm_oil": {
+      "enabled": true,
+      "skill_doc_path": "skills/palm-oil/SKILL.md"
     }
   },
   "persona": {
