@@ -5750,7 +5750,20 @@ def run_civic_forecast_cycle_live(
         try:
             response = agent.submit_civic_forecast(challenge_id, submission_route, body)
         except Exception as exc:
-            item["error"] = str(exc)
+            # A 409 "Idempotency key reused with a different request" means the platform
+            # already holds a submission recorded under this exact key: a prior attempt
+            # succeeded server-side but the local bookkeeping was lost before it could be
+            # persisted (seen after the 2026-09-19 disk-full incident). Retrying can never
+            # succeed -- the key stays the same while each regenerated forecast differs --
+            # so reconcile: mark the challenge processed and leave the server-side
+            # submission alone (its payload is unknown locally, so no revision either).
+            if "Idempotency key reused" in str(exc):
+                agent.mark_civic_forecasted(challenge_id)
+                item["skipped_reason"] = (
+                    "reconciled: platform already holds a submission under this idempotency key"
+                )
+            else:
+                item["error"] = str(exc)
             continue
         balance -= stake_amount
         agent.mark_civic_forecasted(challenge_id)
