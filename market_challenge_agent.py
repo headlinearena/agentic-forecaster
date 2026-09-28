@@ -3878,6 +3878,13 @@ def is_within_predict_window(challenge: dict[str, Any], windows: list[dict[str, 
     return True
 
 
+# Assets cleared on non-US calendars (DCE/SHFE/CFFEX): their challenges open on
+# Beijing-time trading days, so a Monday Beijing session is still Sunday in New York
+# and a blanket NYSE-calendar gate would structurally skip every one of them (this is
+# how PALM went unpredicted by the agentic agents through 2026-09-27).
+_NON_US_CALENDAR_ASSETS = {"PALM", "LC", "AU", "AG", "SH", "HS300"}
+
+
 def is_us_trading_day(moment: datetime) -> bool:
     """Return False on US market weekends/holidays (NYSE calendar)."""
     import pandas_market_calendars as mcal
@@ -5091,7 +5098,10 @@ def build_agentic_prediction_prompt(
 
 
 def select_eligible_challenges_for_agentic_pilot(
-    agent: "MarketCommentAgent", config: dict[str, Any], candidate_events: list[dict[str, Any]]
+    agent: "MarketCommentAgent",
+    config: dict[str, Any],
+    candidate_events: list[dict[str, Any]],
+    us_trading_day: bool = True,
 ) -> list[dict[str, Any]]:
     strategy = config.get("prediction_strategy") or {}
     if not strategy.get("enabled", False):
@@ -5118,6 +5128,8 @@ def select_eligible_challenges_for_agentic_pilot(
             continue
         challenge_id = str(item.get("id") or "").strip()
         if not challenge_id:
+            continue
+        if not us_trading_day and str(item.get("asset") or "").strip().upper() not in _NON_US_CALENDAR_ASSETS:
             continue
         challenge_haystack = " ".join([
             str(item.get("asset") or ""),
@@ -5159,13 +5171,22 @@ def select_eligible_challenges_for_agentic_pilot(
 
 
 def run_agentic_prediction_cycle(agent: "MarketCommentAgent", config: dict[str, Any]) -> dict[str, Any]:
-    if not is_us_trading_day(datetime.now(timezone.utc)):
-        return {"status": "idle", "reason": "Not a US market trading day"}
+    # Non-US-calendar assets (see _NON_US_CALENDAR_ASSETS) stay predictable on US
+    # weekends/holidays; the NYSE-calendar gate now applies per challenge inside the
+    # selection instead of skipping the whole cycle.
+    us_trading_day = is_us_trading_day(datetime.now(timezone.utc))
     candidate_events = load_candidate_events(agent, config)
     event_by_id = {str(event.get("id")): event for event in candidate_events if event.get("id")}
-    eligible = select_eligible_challenges_for_agentic_pilot(agent, config, candidate_events)
+    eligible = select_eligible_challenges_for_agentic_pilot(
+        agent, config, candidate_events, us_trading_day=us_trading_day
+    )
     if not eligible:
-        return {"status": "idle", "reason": "No eligible prediction challenges were found"}
+        reason = (
+            "No eligible prediction challenges were found"
+            if us_trading_day
+            else "Not a US market trading day and no non-US-calendar challenges are open"
+        )
+        return {"status": "idle", "reason": reason}
 
     chat_model = build_langchain_chat_model(config)
     knowledge_tools = build_knowledge_tools(agent.persona_id)
