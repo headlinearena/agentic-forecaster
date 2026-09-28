@@ -5321,8 +5321,8 @@ def run_agentic_prediction_cycle_live(
         request_body = build_prediction_request(prediction, is_revision=is_revision)
         item["request_body"] = request_body
         confidence = float(prediction.get("confidence") or 0.0)
-        if confidence <= min_confidence:
-            item["skipped_reason"] = f"confidence {confidence:.2f} at or below min_confidence {min_confidence:.2f}"
+        if confidence < min_confidence:
+            item["skipped_reason"] = f"confidence {confidence:.2f} below min_confidence {min_confidence:.2f}"
             continue
         if is_revision:
             # Only submit a revision when the thesis meaningfully moved.
