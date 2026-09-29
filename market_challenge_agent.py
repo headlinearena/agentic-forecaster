@@ -3730,14 +3730,18 @@ def build_prediction_prompts(
 
     if is_revision:
         user_prompt += (
-            'If the setup is mixed or weak, choose "neutral" with lower confidence.'
-            ' Return JSON like {"direction":"bullish","confidence":0.67,"reasoning":"detailed market rationale here","summary":"short market rationale here",'
+            "Express your forecast as a full probability vector over the three outcomes"
+            " (bullish/bearish/neutral); the three values must sum to 1."
+            ' If the setup is mixed or weak, shift probability mass toward "neutral".'
+            ' Return JSON like {"probabilities":{"bullish":0.65,"bearish":0.19,"neutral":0.16},"reasoning":"detailed market rationale here","summary":"short market rationale here",'
             '"revision_reason":"one sentence: what new data or event shifted your view, e.g. \'Fed surprise hawkish — dollar strength bearish for gold.\'"}'
         )
     else:
         user_prompt += (
-            'If the setup is mixed or weak, choose "neutral" with lower confidence.'
-            ' Return JSON like {"direction":"bullish","confidence":0.67,"reasoning":"detailed market rationale here","summary":"short market rationale here"}'
+            "Express your forecast as a full probability vector over the three outcomes"
+            " (bullish/bearish/neutral); the three values must sum to 1."
+            ' If the setup is mixed or weak, shift probability mass toward "neutral".'
+            ' Return JSON like {"probabilities":{"bullish":0.65,"bearish":0.19,"neutral":0.16},"reasoning":"detailed market rationale here","summary":"short market rationale here"}'
         )
     return system_prompt, user_prompt
 
@@ -3769,14 +3773,69 @@ def extract_json_object(text: str) -> dict[str, Any]:
     raise ApiError("Prediction response did not contain a usable JSON object")
 
 
+TERNARY_DIRECTIONS = ("bullish", "bearish", "neutral")
+
+
+def normalize_ternary_probabilities(raw: Any) -> dict[str, float] | None:
+    """Validate and normalize a {bullish, bearish, neutral} probability vector.
+
+    Returns a dict with non-negative values summing to exactly 1.0 (rounding
+    residual folded into the largest bin, so the platform's sum-to-1 check with
+    1e-6 tolerance passes), or None when raw is not a usable vector.
+    """
+    if not isinstance(raw, dict):
+        return None
+    values: dict[str, float] = {}
+    for key in TERNARY_DIRECTIONS:
+        value = numeric_value(raw.get(key))
+        if value is None:
+            return None
+        values[key] = max(0.0, float(value))
+    total = sum(values.values())
+    if total <= 0:
+        return None
+    probs = {key: round(value / total, 6) for key, value in values.items()}
+    top = max(probs, key=probs.get)
+    probs[top] = round(probs[top] + (1.0 - sum(probs.values())), 6)
+    return probs
+
+
+def finalize_ternary_prediction(prediction: dict[str, Any]) -> dict[str, Any]:
+    """Attach a normalized probability vector plus derived direction/confidence.
+
+    Accepts either a nested {"probabilities": {...}} dict (JSON prompt path) or
+    flat prob_bullish/prob_bearish/prob_neutral fields (agentic structured
+    output). Legacy direction+confidence dicts pass through unchanged.
+    """
+    probs = normalize_ternary_probabilities(prediction.get("probabilities"))
+    if probs is None:
+        probs = normalize_ternary_probabilities(
+            {key: prediction.get(f"prob_{key}") for key in TERNARY_DIRECTIONS}
+        )
+    if probs is not None:
+        prediction["probabilities"] = probs
+        prediction["direction"] = max(probs, key=probs.get)
+        prediction["confidence"] = probs[prediction["direction"]]
+    return prediction
+
+
 def normalize_prediction_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    direction = str(payload.get("direction") or "").strip().lower()
-    if direction not in {"bullish", "bearish", "neutral"}:
-        raise ApiError(f"Prediction direction must be bullish, bearish, or neutral; got {direction or 'empty'}")
-    confidence = numeric_value(payload.get("confidence"))
-    if confidence is None:
-        raise ApiError("Prediction confidence was missing or not numeric")
-    confidence = max(0.0, min(1.0, confidence))
+    probabilities = normalize_ternary_probabilities(payload.get("probabilities"))
+    if probabilities is None:
+        probabilities = normalize_ternary_probabilities(
+            {key: payload.get(f"prob_{key}") for key in TERNARY_DIRECTIONS}
+        )
+    if probabilities is not None:
+        direction = max(probabilities, key=probabilities.get)
+        confidence = probabilities[direction]
+    else:
+        direction = str(payload.get("direction") or "").strip().lower()
+        if direction not in {"bullish", "bearish", "neutral"}:
+            raise ApiError(f"Prediction direction must be bullish, bearish, or neutral; got {direction or 'empty'}")
+        confidence = numeric_value(payload.get("confidence"))
+        if confidence is None:
+            raise ApiError("Prediction confidence was missing or not numeric")
+        confidence = max(0.0, min(1.0, confidence))
     reasoning = str(payload.get("reasoning") or "").strip()
     if len(reasoning) < 20:
         raise ApiError("Prediction reasoning must be at least 20 characters to satisfy PredictRequest")
@@ -3791,6 +3850,7 @@ def normalize_prediction_payload(payload: dict[str, Any]) -> dict[str, Any]:
     return {
         "direction": direction,
         "confidence": round(confidence, 4),
+        "probabilities": probabilities,
         "reasoning": reasoning,
         "summary": summary,
         "revision_reason": revision_reason,
@@ -3804,12 +3864,23 @@ def build_prediction_request(
     is_revision: bool = False,
     trigger_event_id: str | None = None,
 ) -> dict[str, Any]:
-    payload: dict[str, Any] = {
-        "direction": str(decision.get("direction") or ""),
-        "confidence": float(decision.get("confidence") or 0.0),
-        "reasoning": str(decision.get("reasoning") or "").strip(),
-        "is_revision": is_revision,
-    }
+    probabilities = normalize_ternary_probabilities(decision.get("probabilities"))
+    if probabilities is not None:
+        # Preferred encoding: the platform Brier-scores the exact vector instead of
+        # splitting the residual (1-confidence) evenly across the other outcomes.
+        # direction/confidence are derived server-side from the argmax.
+        payload: dict[str, Any] = {
+            "probabilities": probabilities,
+            "reasoning": str(decision.get("reasoning") or "").strip(),
+            "is_revision": is_revision,
+        }
+    else:
+        payload = {
+            "direction": str(decision.get("direction") or ""),
+            "confidence": float(decision.get("confidence") or 0.0),
+            "reasoning": str(decision.get("reasoning") or "").strip(),
+            "is_revision": is_revision,
+        }
     summary = str(decision.get("summary") or "").strip()
     if summary:
         payload["summary"] = summary
@@ -5058,8 +5129,10 @@ def build_agentic_prediction_prompt(
         " you do not need to call every tool, and flash/short-horizon challenges typically need less macro"
         " context than daily challenges. Before finalizing, use at least one live market-data tool (not just"
         " historical retrieval) to confirm your reasoning reflects current, not stale, conditions."
-        " Once you have enough information, respond with your final prediction."
-        " direction must be exactly bullish, bearish, or neutral. confidence must be a number between 0 and 1."
+        " Once you have enough information, respond with your final prediction as a full probability vector:"
+        " prob_bullish, prob_bearish and prob_neutral must each be between 0 and 1 and together sum to 1"
+        " (neutral means the price change settles inside the asset's dead zone)."
+        " If the setup is mixed or weak, shift probability mass toward neutral."
         " reasoning must be detailed, trading-relevant, and at least 20 characters."
     )
     if strategy_card:
@@ -5277,14 +5350,14 @@ def generate_agentic_prediction_for_challenge(
     callbacks, langfuse_metadata = build_langfuse_callbacks(
         config, trace_persona_id or f"{agent.persona_id}-pilot", "prediction"
     )
-    return run_agentic_generation(
+    return finalize_ternary_prediction(run_agentic_generation(
         chat_model, tools, system_prompt, user_prompt, PredictionOutput, on_turn=record_turn,
         callbacks=callbacks, metadata=langfuse_metadata,
         require_tool_groups=[
             frozenset(t.name for t in skill_tools),
             frozenset(t.name for t in knowledge_tools),
         ],
-    )
+    ))
 
 
 def run_agentic_prediction_cycle_live(

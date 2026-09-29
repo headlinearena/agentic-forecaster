@@ -14,8 +14,16 @@ TOOL_CALL_RETRY_DELAY = 1.0
 
 
 class PredictionOutput(BaseModel):
-    direction: str = Field(description="bullish, bearish, or neutral")
-    confidence: float = Field(description="a number between 0 and 1")
+    prob_bullish: float = Field(
+        description="your probability (0 to 1) that the challenge settles bullish; the three probabilities must sum to 1"
+    )
+    prob_bearish: float = Field(
+        description="your probability (0 to 1) that the challenge settles bearish; the three probabilities must sum to 1"
+    )
+    prob_neutral: float = Field(
+        description="your probability (0 to 1) that the challenge settles neutral, i.e. the price change stays"
+        " inside the asset's dead zone; the three probabilities must sum to 1"
+    )
     reasoning: str = Field(description="detailed, trading-relevant rationale, at least 20 characters")
     summary: str = Field(description="a concise 1-3 sentence human-readable rationale")
 
